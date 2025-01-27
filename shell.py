@@ -5,6 +5,16 @@ import subprocess
 import json  # Para almacenar los datos en formato JSON
 import datetime
 import socket
+sistema_error_log = "/var/log/shell/sistema_error.log"
+
+def registrar_error(mensaje):
+    if not os.path.exists("/var/log/shell"):
+        os.makedirs("/var/log/shell", exist_ok=True)
+    if not os.path.isfile(sistema_error_log):
+        open(sistema_error_log, "w").close()
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(sistema_error_log, "a") as log:
+        log.write(f"{timestamp} - ERROR: {mensaje}\n")
 
 def obtener_ip_local():
     """
@@ -62,7 +72,13 @@ def copiar_archivo(origen_carpeta, archivo_nombre, destino_carpeta):
         print(f"Error al copiar el archivo: {e}")
         registrar_error()
             
+def verificar_archivos_necesarios():
+    if not os.path.exists("usuarios.json"):
+        print("Creando archivo usuarios.json...")
+        with open("usuarios.json", "w") as archivo:
+            json.dump({}, archivo)
 
+verificar_archivos_necesarios()
 def mover_archivo(origen_carpeta, archivo_nombre, destino_carpeta):
     """
     Mueve un archivo de una carpeta origen a una carpeta destino.
@@ -158,6 +174,40 @@ def listar_contenido(carpeta):
         print(f"Error al listar el contenido de la carpeta: {e}")
         registrar_error()
 
+import subprocess
+
+def crear_usuario_sistema(nombre_usuario, contrasena=None):
+    """
+    Crea un usuario en el sistema operativo.
+    
+    :param nombre_usuario: Nombre del usuario que se va a crear.
+    :param contrasena: Contraseña del usuario (opcional).
+    """
+    try:
+        # Comando para agregar el usuario
+        comando_crear = f"useradd {nombre_usuario}"
+        resultado = subprocess.run(comando_crear, shell=True, check=True, capture_output=True, text=True)
+        print(f"Usuario '{nombre_usuario}' creado en el sistema operativo.")
+
+        # Si se proporciona una contraseña, establecerla
+        if contrasena:
+            comando_contrasena = f"echo '{nombre_usuario}:{contrasena}' | chpasswd"
+            subprocess.run(comando_contrasena, shell=True, check=True, capture_output=True, text=True)
+            print(f"Contraseña configurada para el usuario '{nombre_usuario}'.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error al crear el usuario '{nombre_usuario}': {e.stderr}")
+        registrar_error(f"Error al crear el usuario '{nombre_usuario}': {e.stderr}")
+    except Exception as e:
+        print(f"Error inesperado al crear el usuario '{nombre_usuario}': {e}")
+        registrar_error(f"Error inesperado al crear el usuario '{nombre_usuario}': {e}")
+
+    if verificar_usuario_existe(nombre_usuario):
+    print(f"El usuario '{nombre_usuario}' ya existe en el sistema operativo.")
+    return
+
+
+
+
 def crear_directorio(ruta_carpeta):
     """
     Crea un nuevo directorio en la ruta especificada.
@@ -182,24 +232,26 @@ def crear_directorio(ruta_carpeta):
 
 def cambiar_directorio(nuevo_directorio):
     """
-    Cambia el directorio actual de trabajo al especificado.
+    Cambia el directorio actual de trabajo al especificado tanto en la shell como en el sistema operativo.
 
-    Parámetros:
-        - nuevo_directorio: Ruta del directorio al que se desea cambiar.
+    :param nuevo_directorio: Ruta del directorio al que se desea cambiar.
     """
     global directorio_actual
     try:
-        # Verificamos que el directorio existe.
+        # Verificar si el directorio existe
         if os.path.isdir(nuevo_directorio):
-            # Actualizamos la variable global del directorio actual.
-            directorio_actual = os.path.abspath(nuevo_directorio)
+            # Cambiar el directorio en el sistema operativo
+            os.chdir(nuevo_directorio)
+            # Actualizar la variable global del directorio actual
+            directorio_actual = os.getcwd()
             print(f"Directorio cambiado a: {directorio_actual}")
         else:
             print(f"El directorio '{nuevo_directorio}' no existe.")
     except Exception as e:
-        # En caso de error, lo registramos.
+        # Manejar cualquier error durante el cambio de directorio
         print(f"Error al cambiar de directorio: {e}")
-        registrar_error()
+        registrar_error(f"Error al cambiar de directorio: {e}")
+
 
 
 def cambiar_permisos(ruta_archivo, permisos):
@@ -293,42 +345,69 @@ def propietario_comando(argumentos):
 
         
 
-def cambiar_contrasena(usuario, nueva_contrasena):
+def cambiar_password(usuario, nueva_password):
     """
-    Cambia la contraseña de un usuario en Linux.
+    Cambia la contraseña de un usuario del sistema operativo.
 
-    :param usuario: El nombre del usuario cuya contraseña se cambiará.
-    :param nueva_contrasena: La nueva contraseña para el usuario.
+    :param usuario: Nombre del usuario del sistema operativo.
+    :param nueva_password: Nueva contraseña a asignar al usuario.
     """
     try:
-        # Usamos 'passwd' para cambiar la contraseña
-        comando = f"echo '{usuario}:{nueva_contrasena}' | sudo chpasswd"
-        # Ejecutamos el comando
+        # Comando para cambiar la contraseña usando `passwd`
+        comando = f"echo '{usuario}:{nueva_password}' | sudo chpasswd"
         subprocess.run(comando, shell=True, check=True)
         print(f"Contraseña de '{usuario}' cambiada exitosamente.")
     except subprocess.CalledProcessError:
         print("Error al cambiar la contraseña. Asegúrate de tener privilegios de superusuario.")
-        registrar_error()
+        registrar_error(f"Error al cambiar contraseña para usuario '{usuario}'.")
     except Exception as e:
         print(f"Error al cambiar la contraseña: {e}")
-        registrar_error()
+        registrar_error(f"Error inesperado al cambiar contraseña: {e}")
+    
 
 
 # Almacenamiento de usuarios en un archivo JSON
 usuarios_file = "usuarios.json"
 
 def cargar_usuarios():
-    """Carga los usuarios desde un archivo JSON."""
     try:
-        if os.path.exists("usuarios.json"):
-            with open("usuarios.json", "r") as archivo:
-                return json.load(archivo)
-        else:
-            return {}  # Devuelve un diccionario vacío si el archivo no existe
-    except Exception as e:
+        # Si no existe el archivo, inicializarlo
+        if not os.path.exists("usuarios.json"):
+            with open("usuarios.json", "w") as archivo:
+                json.dump({}, archivo)
+        
+        # Intentar cargar el archivo JSON
+        with open("usuarios.json", "r") as archivo:
+            usuarios = json.load(archivo)
+        
+        # Verificar que el contenido sea un diccionario
+        if not isinstance(usuarios, dict):
+            raise ValueError("El archivo usuarios.json no es un diccionario válido.")
+        
+        return usuarios
+    except (json.JSONDecodeError, ValueError) as e:
         print(f"Error al cargar usuarios: {e}")
         registrar_error(f"Error al cargar usuarios: {e}")
-        return {}  # Devuelve un diccionario vacío si ocurre un error
+
+        # Reparar el archivo con un diccionario vacío
+        usuarios = {}
+        with open("usuarios.json", "w") as archivo:
+            json.dump(usuarios, archivo)
+        return usuarios
+
+    except (json.JSONDecodeError, ValueError) as e:
+        # Manejar errores de formato o contenido inválido
+        print(f"Error al cargar usuarios: {e}")
+        registrar_error(f"Error al cargar usuarios: {e}")
+
+        # Reparar el archivo con un diccionario vacío
+        usuarios = {}
+        guardar_usuarios()  # Sobrescribir con un diccionario vacío
+        return usuarios
+
+
+
+
 
 def guardar_usuarios(usuarios):
     """Guarda los usuarios en un archivo JSON."""
@@ -336,23 +415,49 @@ def guardar_usuarios(usuarios):
         json.dump(usuarios, file, indent=4)
 
 def agregar_usuario():
-    """Agrega un nuevo usuario con datos personales."""
-    nombre = input("Ingrese el nombre del usuario: ")
-    correo = input("Ingrese el correo del usuario: ")
-    horario_trabajo = input("Ingrese el horario de trabajo del usuario (ejemplo: 9:00 AM - 5:00 PM): ")
-    lugares_conexion = input("Ingrese los posibles lugares de conexión (IP o localhost, separados por comas): ").split(',')
+    """Registrar un nuevo usuario o actualizar uno existente."""
+    nombre = input("Ingrese el nombre del usuario: ").strip()
+    contrasena = input("Ingrese la contraseña para el usuario: ").strip()
+    
+    if nombre in usuarios:
+        print(f"El usuario '{nombre}' ya existe en el archivo. ¿Desea actualizar sus datos? (s/n)")
+        respuesta = input().strip().lower()
+        if respuesta != 's':
+            print("Operación cancelada.")
+            return
+    else:
+        print(f"Registrando nuevo usuario: {nombre}.")
 
-    usuario = {
-        "nombre": nombre,
-        "correo": correo,
+    # Solicitar datos adicionales
+    horario_trabajo = input("Ingrese el horario de trabajo (ejemplo: 9:00 - 17:00): ").strip()
+    lugares_conexion = input("Ingrese los lugares de conexión (IPs o localhost, separados por comas): ").split(',')
+
+    # Crear el usuario en el sistema operativo
+    crear_usuario_sistema(nombre, contrasena)
+
+    # Guardar los datos del usuario en el archivo JSON
+    usuarios[nombre] = {
         "horario_trabajo": horario_trabajo,
         "lugares_conexion": [ip.strip() for ip in lugares_conexion]
     }
+    guardar_usuarios()
+    print(f"Los datos de '{nombre}' han sido registrados exitosamente.")
 
-    usuarios = cargar_usuarios()
-    usuarios[nombre] = usuario
-    guardar_usuarios(usuarios)
-    print(f"Usuario '{nombre}' agregado exitosamente.")
+def verificar_usuario_existe(nombre_usuario):
+    """
+    Verifica si un usuario ya existe en el sistema operativo.
+    
+    :param nombre_usuario: Nombre del usuario.
+    :return: True si el usuario existe, False en caso contrario.
+    """
+    try:
+        resultado = subprocess.run(f"id -u {nombre_usuario}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return resultado.returncode == 0  # Código de retorno 0 significa que el usuario existe
+    except Exception as e:
+        print(f"Error al verificar si el usuario existe: {e}")
+        registrar_error(f"Error al verificar si el usuario '{nombre_usuario}' existe: {e}")
+        return False
+
 
 def mostrar_usuarios():
     """Muestra los datos de todos los usuarios."""
@@ -393,14 +498,18 @@ def actualizar_usuario():
 usuarios = {}
 
 def cargar_usuarios():
-    """Cargar los usuarios desde un archivo JSON (si existe)."""
+    """Cargar los usuarios desde un archivo JSON."""
     global usuarios
     try:
+        if not os.path.exists("usuarios.json"):
+            # Crear un archivo JSON vacío si no existe
+            with open("usuarios.json", "w") as archivo:
+                json.dump({}, archivo)  # Guardar un diccionario vacío
         with open("usuarios.json", "r") as archivo:
             usuarios = json.load(archivo)
-    except FileNotFoundError:
+    except Exception as e:
         usuarios = {}
-        registrar_error()
+        registrar_error(f"Error al cargar usuarios: {e}")   
 
 def guardar_usuarios():
     """Guardar los usuarios en un archivo JSON."""
@@ -581,10 +690,7 @@ def menu_demonios():
 
 sistema_error_log = "/var/log/shell/sistema_error.log"
 
-def registrar_error(mensaje):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(sistema_error_log, "a") as log:
-        log.write(f"{timestamp} - ERROR: {mensaje}\n")
+
 
 def ejecutar_comando_sistema(comando):
     """
@@ -592,96 +698,95 @@ def ejecutar_comando_sistema(comando):
     
     :param comando: Comando del sistema ingresado por el usuario.
     """
-    try:    
-        # Ejecutar el comando y capturar la salida
-        resultado = subprocess.run(comando, shell=True, capture_output=True, text=True)
-        
-        # Mostrar la salida estándar y los errores
-        if resultado.stdout:
-            print(f"Salida:\n{resultado.stdout}")
-        if resultado.stderr:
-            print(f"Error:\n{resultado.stderr}")
+    try:
+        # Ejecutar el comando directamente en el terminal interactivo
+        subprocess.run(comando, shell=True)
     except Exception as e:
         print(f"Error al ejecutar el comando: {e}")
-        registrar_error()
+        registrar_error(f"Error ejecutando comando: {comando}")
+
+
 
 
 usuario_horarios_log = "usuario_horarios_log"
 
 def validar_horario(ahora, horario_permitido):
-    """
-    Valida si el horario actual está dentro del rango permitido.
-    
-    :param ahora: Hora actual (datetime.time).
-    :param horario_permitido: Diccionario con claves 'inicio' y 'fin' como rangos.
-    :return: True si está dentro del rango, False si no.
-    """
-    inicio = datetime.datetime.strptime(horario_permitido['inicio'], "%H:%M").time()
-    fin = datetime.datetime.strptime(horario_permitido['fin'], "%H:%M").time()
-    return inicio <= ahora <= fin
+    try:
+        inicio = datetime.datetime.strptime(horario_permitido['inicio'], "%H:%M").time()
+        fin = datetime.datetime.strptime(horario_permitido['fin'], "%H:%M").time()
+
+        # Si el rango cruza la medianoche, manejarlo específicamente
+        if inicio > fin:
+            return ahora >= inicio or ahora <= fin
+        else:
+            return inicio <= ahora <= fin
+    except ValueError as e:
+        registrar_error(f"Formato de hora inválido en horario_permitido: {e}")
+        return False
+
 
 def registrar_evento_sesion(usuario, ip, tipo_evento):
-    """
-    Registra el inicio o salida de sesión del usuario, validando horario y IPs permitidas.
-
-    :param usuario: Nombre del usuario.
-    :param ip: Dirección IP de la conexión.
-    :param tipo_evento: 'inicio' o 'salida'.
-    """
     usuarios = cargar_usuarios()
+    if not isinstance(usuarios, dict):
+        print("Error: El archivo de usuarios no contiene un formato válido.")
+        registrar_error("Archivo usuarios.json no es un diccionario válido.")
+        return False
+
     if usuario not in usuarios:
-        print(f"Error: El usuario '{usuario}' no está registrado. Por favor, registre el usuario antes de continuar.")
+        print(f"Error: El usuario '{usuario}' no está registrado.")
+        registrar_error(f"Intento de sesión con usuario no registrado: {usuario}")
         return False
 
     ahora = datetime.datetime.now()
     horario_actual = ahora.time()
-    usuario_info = usuarios[usuario]
+    usuario_info = usuarios.get(usuario, {})
 
-    horario_permitido = {
-        "inicio": usuario_info["horario_trabajo"].split("-")[0].strip(),
-        "fin": usuario_info["horario_trabajo"].split("-")[1].strip(),
-    }
+    try:
+        horario_permitido = {
+            "inicio": usuario_info["horario_trabajo"].split("-")[0].strip(),
+            "fin": usuario_info["horario_trabajo"].split("-")[1].strip(),
+        }
+    except KeyError as e:
+        registrar_error(f"Falta clave en datos de usuario {usuario}: {e}")
+        return False
 
-    ips_permitidas = usuario_info["lugares_conexion"]
+    ips_permitidas = usuario_info.get("lugares_conexion", [])
     dentro_de_horario = validar_horario(horario_actual, horario_permitido)
     ip_permitida = ip in ips_permitidas
 
     mensaje = f"{ahora.strftime('%Y-%m-%d %H:%M:%S')} - Usuario: {usuario} - Evento: {tipo_evento} - IP: {ip}"
-
     if not dentro_de_horario:
         mensaje += " (FUERA DE HORARIO)"
     if not ip_permitida:
         mensaje += " (IP NO PERMITIDA)"
 
-    # Registrar en el log
     with open(usuario_horarios_log, "a") as log:
         log.write(mensaje + "\n")
-
     print("Evento de sesión registrado.")
     return True
 
 
 def mostrar_help():
     print(f"""
-Comandos disponibles:
-  copiar <carpeta_origen> <nombre_archivo> <carpeta_destino>  - Copia un archivo de una carpeta a otra.
-  mover <carpeta_origen> <nombre_archivo> <carpeta_destino>   - Mueve un archivo de una carpeta a otra.
-  renombrar <carpeta_origen> <nombre_archivo> <nuevo_nombre>  - Renombra un archivo en la misma carpeta.
-  listar <carpeta>                                           - Lista los archivos y directorios en una carpeta.
-  creardir <carpeta>                                         - Crea un nuevo directorio.
-  ir <nuevo_directorio>                                      - Cambia al directorio especificado.
-  permisos <archivo> <permisos>                              - Cambia los permisos de un archivo (ejemplo: 777, 755).
-  propietario <archivo/ruta> <UID> <GID>                     - Cambia el propietario de un archivo o directorio.
-  contraseña <usuario> <nueva_contrasena>                    - Cambia la contraseña de un usuario.
-  usuario                                                    - Opciones de usuario
-  demonios                                                   - Manejo de demonios
-  transferencias                                             - Realizar transferencias FTP o SCP
-  <comando del sistema>                                      - Ejecuta cualquier comando del sistema no mencionado aquí.
-  help                                                       - Muestra esta lista de comandos disponibles.
-  salir                                                      - Sale de la shell.
+    Comandos disponibles:
+    copiar <carpeta_origen> <nombre_archivo> <carpeta_destino>  - Copia un archivo de una carpeta a otra.
+    mover <carpeta_origen> <nombre_archivo> <carpeta_destino>   - Mueve un archivo de una carpeta a otra.
+    renombrar <carpeta_origen> <nombre_archivo> <nuevo_nombre>  - Renombra un archivo en la misma carpeta.
+    listar <carpeta>                                           - Lista los archivos y directorios en una carpeta.
+    creardir <carpeta>                                         - Crea un nuevo directorio.
+    ir <nuevo_directorio>                                      - Cambia al directorio especificado.
+    permisos <archivo> <permisos>                              - Cambia los permisos de un archivo (ejemplo: 777, 755).
+    propietario <archivo/ruta> <UID> <GID>                     - Cambia el propietario de un archivo o directorio.
+    password <usuario> <nueva_contrasena>                    - Cambia la contraseña de un usuario.
+    usuario                                                    - Opciones de usuario
+    demonios                                                   - Manejo de demonios
+    transferencias                                             - Realizar transferencias FTP o SCP
+    <comando del sistema>                                      - Ejecuta cualquier comando del sistema no mencionado aquí.
+    help                                                       - Muestra esta lista de comandos disponibles.
+    salir                                                      - Sale de la shell.
 
-Directorio actual: {directorio_actual}
-    """)
+    Directorio actual: {directorio_actual}
+        """)
 transferencias_log = "Shell_transferencias.log"
 
 def registrar_transferencia(usuario, comando, resultado):
@@ -719,6 +824,7 @@ def transferencia_ftp(usuario, servidor, usuario_ftp, clave, archivo_origen, arc
     except Exception as e:
         registrar_transferencia(usuario, f"FTP {archivo_origen} -> {archivo_destino}", f"Error: {e}")
         print(f"Error en transferencia FTP: {e}")
+        
         registrar_error()
 
 def transferencia_scp(usuario, archivo_origen, destino):
@@ -742,6 +848,8 @@ def transferencia_scp(usuario, archivo_origen, destino):
     except Exception as e:
         registrar_transferencia(usuario, f"SCP {archivo_origen} -> {destino}", f"Error: {e}")
         print(f"Error en transferencia SCP: {e}")
+        
+
         registrar_error()
 def menu_transferencias(usuario):
     """
@@ -775,84 +883,76 @@ def menu_transferencias(usuario):
 def shell():
     print("Bienvenido a la shell de archivos. Usa 'help' para ver los comandos disponibles.")
     
-
-     # Solicitar información del usuario
-    usuario = input("Ingrese su nombre de usuario: ").strip()
+    # Solicitar información del usuario
+    nombre_usuario = input("Ingrese su nombre de usuario: ").strip()  # Evitar conflicto con 'usuario'
     ip = obtener_ip_local()
     print(f"Conectado desde la IP: {ip}")
 
     # Registrar inicio de sesión
-    if not registrar_evento_sesion(usuario, ip, "inicio"):
+    if not registrar_evento_sesion(nombre_usuario, ip, "inicio"):
         print("El usuario no está registrado correctamente. Continuará en la shell con acceso limitado.")
 
-    # Registrar inicio de sesión
-    registrar_evento_sesion(usuario, ip, "inicio")
     try:
         while True:
-            comando = input("Shell> ").strip().lower()
+            comando = input("Shell> ").strip()  # Leer comando del usuario
             
-            if comando == "salir":
-                print("Saliendo de la shell. ¡Hasta luego!")
-                registrar_evento_sesion(usuario, ip, "salida")
-                break
+            if not comando:
+                continue  # Si el comando está vacío, vuelve a pedir entrada
             
-            if comando == "help":
-                mostrar_help()
-                continue
-            if comando == "usuario":
-                usuario()  # Ejecutar la función 'usuario'
-            if comando == "demonios":
-                menu_demonios()
-                continue
-            if comando == "transferencias":
-                menu_transferencias(usuario)
-                continue
-
             partes = comando.split()
+            cmd = partes[0].lower()  # Comando principal
+            args = partes[1:]  # Argumentos del comando
             
-            if len(partes) > 1:
-                if partes[0] == "copiar" and len(partes) == 3:
-                    copiar_archivo(partes[1], partes[2])
-                elif partes[0] == "mover" and len(partes) == 3:
-                    mover_archivo(partes[1], partes[2])
-                elif partes[0] == "renombrar" and len(partes) == 3:
-                    renombrar_archivo(partes[1], partes[2])
-                elif partes[0] == "listar" and len(partes) == 2:
-                    listar_contenido(partes[1])
-                elif partes[0] == "creardir" and len(partes) == 2:
-                    crear_directorio(partes[1])
-                elif partes[0] == "ir" and len(partes) == 2:
-                    cambiar_directorio(partes[1])
-                elif partes[0] == "permisos" and len(partes) == 3:
-                    cambiar_permisos(partes[1], int(partes[2], 8))
-                elif partes[0] == "propietario" and len(partes) == 4:
-                    propietario_comando(partes[1:])
-                elif partes[0] == "contraseña" and len(partes) == 3:
-                    cambiar_contrasena(partes[1], partes[2])
-                elif partes[0] == "agregar_usuario":
-                    agregar_usuario()
-                elif partes[0] == "mostrar_usuarios":
-                    mostrar_usuarios()
-                elif partes[0] == "actualizar_usuario":
-                    actualizar_usuario()
-                else:
-                    # Intentar ejecutar como comando del sistema
-                    try:
-                        ejecutar_comando_sistema(comando)
-                    except Exception:
-                        print("Usa 'help' para ver los comandos disponibles.")
-                        registrar_error("Comando inválido: " + comando)
+            # Manejo de comandos
+            if cmd == "salir":
+                print("Saliendo de la shell. ¡Hasta luego!")
+                registrar_evento_sesion(nombre_usuario, ip, "salida")
+                break
+            elif cmd == "help":
+                mostrar_help()
+            elif cmd == "usuario":
+                mostrar_menu_usuario()  # Usar el nombre correcto de la función
+            elif cmd == "demonios":
+                menu_demonios()  # Ejecutar el menú de demonios
+            elif cmd == "transferencias":
+                menu_transferencias(nombre_usuario)  # Ejecutar el menú de transferencias
+            elif cmd == "copiar" and len(args) == 3:
+                copiar_archivo(args[0], args[1], args[2])  # Copiar archivo
+            elif cmd == "mover" and len(args) == 3:
+                mover_archivo(args[0], args[1], args[2])  # Mover archivo
+            elif cmd == "renombrar" and len(args) == 3:
+                renombrar_archivo(args[0], args[1], args[2])  # Renombrar archivo
+            elif cmd == "listar" and len(args) == 1:
+                listar_contenido(args[0])  # Listar contenido de un directorio
+            elif cmd == "creardir" and len(args) == 1:
+                crear_directorio(args[0])  # Crear un nuevo directorio
+            elif cmd == "ir" and len(args) == 1:
+                cambiar_directorio(args[0])  # Cambiar el directorio actual
+            elif cmd == "permisos" and len(args) == 2:
+                cambiar_permisos(args[0], args[1])  # Cambiar permisos de archivo/directorio
+            elif cmd == "propietario" and len(args) == 3:
+                propietario_comando(args)  # Cambiar propietario de un archivo/directorio
+            elif cmd == "password" and len(args) == 2:
+                cambiar_password(args[0], args[1])  # Cambia la contraseña del usuario
+            elif cmd == "agregar_usuario":
+                agregar_usuario()  # Agregar un nuevo usuario
+            elif cmd == "mostrar_usuarios":
+                mostrar_usuarios()  # Mostrar usuarios registrados
+            elif cmd == "actualizar_usuario":
+                actualizar_usuario()  # Actualizar un usuario existente
             else:
-                # Si no es un comando específico y no tiene más de una palabra
+                 # Si no coincide con comandos personalizados, intentamos ejecutar como comando del sistema
                 try:
                     ejecutar_comando_sistema(comando)
-                except Exception:
-                    print("Usa 'help' para ver los comandos disponibles.")
-                    registrar_error("Comando inválido")
+                except Exception as e:
+                    print(f"Error al ejecutar el comando del sistema: {e}")
+                    registrar_error(f"Error ejecutando comando: {comando}")
 
     except KeyboardInterrupt:
+        # Manejar interrupción de teclado (Ctrl+C)
         print("\nSesión terminada por el usuario.")
-        registrar_evento_sesion(usuario, ip, "salida")
+        registrar_evento_sesion(nombre_usuario, ip, "salida")
         registrar_error("Sesión terminada por el usuario")
+
 if __name__ == "__main__":
     shell()
