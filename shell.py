@@ -5,6 +5,8 @@ import subprocess
 import json  # Para almacenar los datos en formato JSON
 import datetime
 import socket
+import fcntl 
+usuarios = {}
 sistema_error_log = "/var/log/shell/sistema_error.log"
 
 def registrar_error(mensaje):
@@ -13,8 +15,11 @@ def registrar_error(mensaje):
     if not os.path.isfile(sistema_error_log):
         open(sistema_error_log, "w").close()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(sistema_error_log, "a") as log:
-        log.write(f"{timestamp} - ERROR: {mensaje}\n")
+    try:
+        with open(sistema_error_log, "a") as log:
+             log.write(f"{timestamp} - ERROR: {mensaje}\n")
+    except Exception as e:
+        print(f"Error al escribir en el log: {e}")
 
 def obtener_ip_local():
     """
@@ -179,19 +184,16 @@ import subprocess
 def crear_usuario_sistema(nombre_usuario, contrasena=None):
     """
     Crea un usuario en el sistema operativo.
-    
-    :param nombre_usuario: Nombre del usuario que se va a crear.
-    :param contrasena: Contraseña del usuario (opcional).
     """
     try:
         # Comando para agregar el usuario
-        comando_crear = f"useradd {nombre_usuario}"
+        comando_crear = f"sudo useradd {nombre_usuario} -m"
         resultado = subprocess.run(comando_crear, shell=True, check=True, capture_output=True, text=True)
         print(f"Usuario '{nombre_usuario}' creado en el sistema operativo.")
 
         # Si se proporciona una contraseña, establecerla
         if contrasena:
-            comando_contrasena = f"echo '{nombre_usuario}:{contrasena}' | chpasswd"
+            comando_contrasena = f"echo '{nombre_usuario}:{contrasena}' | sudo chpasswd"
             subprocess.run(comando_contrasena, shell=True, check=True, capture_output=True, text=True)
             print(f"Contraseña configurada para el usuario '{nombre_usuario}'.")
     except subprocess.CalledProcessError as e:
@@ -201,9 +203,7 @@ def crear_usuario_sistema(nombre_usuario, contrasena=None):
         print(f"Error inesperado al crear el usuario '{nombre_usuario}': {e}")
         registrar_error(f"Error inesperado al crear el usuario '{nombre_usuario}': {e}")
 
-    if verificar_usuario_existe(nombre_usuario):
-    print(f"El usuario '{nombre_usuario}' ya existe en el sistema operativo.")
-    return
+
 
 
 
@@ -369,79 +369,9 @@ def cambiar_password(usuario, nueva_password):
 # Almacenamiento de usuarios en un archivo JSON
 usuarios_file = "usuarios.json"
 
-def cargar_usuarios():
-    try:
-        # Si no existe el archivo, inicializarlo
-        if not os.path.exists("usuarios.json"):
-            with open("usuarios.json", "w") as archivo:
-                json.dump({}, archivo)
-        
-        # Intentar cargar el archivo JSON
-        with open("usuarios.json", "r") as archivo:
-            usuarios = json.load(archivo)
-        
-        # Verificar que el contenido sea un diccionario
-        if not isinstance(usuarios, dict):
-            raise ValueError("El archivo usuarios.json no es un diccionario válido.")
-        
-        return usuarios
-    except (json.JSONDecodeError, ValueError) as e:
-        print(f"Error al cargar usuarios: {e}")
-        registrar_error(f"Error al cargar usuarios: {e}")
-
-        # Reparar el archivo con un diccionario vacío
-        usuarios = {}
-        with open("usuarios.json", "w") as archivo:
-            json.dump(usuarios, archivo)
-        return usuarios
-
-    except (json.JSONDecodeError, ValueError) as e:
-        # Manejar errores de formato o contenido inválido
-        print(f"Error al cargar usuarios: {e}")
-        registrar_error(f"Error al cargar usuarios: {e}")
-
-        # Reparar el archivo con un diccionario vacío
-        usuarios = {}
-        guardar_usuarios()  # Sobrescribir con un diccionario vacío
-        return usuarios
 
 
 
-
-
-def guardar_usuarios(usuarios):
-    """Guarda los usuarios en un archivo JSON."""
-    with open(usuarios_file, "w") as file:
-        json.dump(usuarios, file, indent=4)
-
-def agregar_usuario():
-    """Registrar un nuevo usuario o actualizar uno existente."""
-    nombre = input("Ingrese el nombre del usuario: ").strip()
-    contrasena = input("Ingrese la contraseña para el usuario: ").strip()
-    
-    if nombre in usuarios:
-        print(f"El usuario '{nombre}' ya existe en el archivo. ¿Desea actualizar sus datos? (s/n)")
-        respuesta = input().strip().lower()
-        if respuesta != 's':
-            print("Operación cancelada.")
-            return
-    else:
-        print(f"Registrando nuevo usuario: {nombre}.")
-
-    # Solicitar datos adicionales
-    horario_trabajo = input("Ingrese el horario de trabajo (ejemplo: 9:00 - 17:00): ").strip()
-    lugares_conexion = input("Ingrese los lugares de conexión (IPs o localhost, separados por comas): ").split(',')
-
-    # Crear el usuario en el sistema operativo
-    crear_usuario_sistema(nombre, contrasena)
-
-    # Guardar los datos del usuario en el archivo JSON
-    usuarios[nombre] = {
-        "horario_trabajo": horario_trabajo,
-        "lugares_conexion": [ip.strip() for ip in lugares_conexion]
-    }
-    guardar_usuarios()
-    print(f"Los datos de '{nombre}' han sido registrados exitosamente.")
 
 def verificar_usuario_existe(nombre_usuario):
     """
@@ -460,118 +390,167 @@ def verificar_usuario_existe(nombre_usuario):
 
 
 def mostrar_usuarios():
-    """Muestra los datos de todos los usuarios."""
-    usuarios = cargar_usuarios()
+    """Muestra todos los usuarios registrados con su información."""
     if not usuarios:
         print("No hay usuarios registrados.")
         return
+
+    print("\n--- Usuarios registrados ---")
     for nombre, datos in usuarios.items():
-        print(f"\nUsuario: {nombre}")
-        print(f"Correo: {datos['correo']}")
-        print(f"Horario de Trabajo: {datos['horario_trabajo']}")
-        print(f"Lugares de Conexión: {', '.join(datos['lugares_conexion'])}")
+        horario = datos.get("horario_trabajo", "No definido")
+        lugares = ", ".join(datos.get("lugares_conexion", ["No definido"]))
+        print(f"Usuario: {nombre}")
+        print(f"  Horario de trabajo: {horario}")
+        print(f"  Lugares de conexión: {lugares}\n")
+
+
 
 def actualizar_usuario():
-    """Actualiza los datos de un usuario existente."""
-    nombre = input("Ingrese el nombre del usuario a actualizar: ")
-    usuarios = cargar_usuarios()
+    """Permite actualizar la información de un usuario existente."""
+    global usuarios
 
+    nombre = input("Ingrese el nombre del usuario a actualizar: ").strip()
+    
     if nombre not in usuarios:
-        print(f"El usuario '{nombre}' no existe.")
+        print(f"Error: El usuario '{nombre}' no está registrado.")
         return
 
-    print(f"Actualizando los datos del usuario '{nombre}':")
-    correo = input(f"Nuevo correo (actual: {usuarios[nombre]['correo']}): ")
-    horario_trabajo = input(f"Nuevo horario de trabajo (actual: {usuarios[nombre]['horario_trabajo']}): ")
-    lugares_conexion = input(f"Nuevos lugares de conexión (actual: {', '.join(usuarios[nombre]['lugares_conexion'])}): ").split(',')
+    print(f"\nDatos actuales del usuario '{nombre}':")
+    print(f"  Horario de trabajo: {usuarios[nombre]['horario_trabajo']}")
+    print(f"  Lugares de conexión: {', '.join(usuarios[nombre]['lugares_conexion'])}")
 
-    usuarios[nombre] = {
-        "nombre": nombre,
-        "correo": correo,
-        "horario_trabajo": horario_trabajo,
-        "lugares_conexion": [ip.strip() for ip in lugares_conexion]
-    }
-    guardar_usuarios(usuarios)
+    nuevo_horario = input("Ingrese el nuevo horario de trabajo (o presione Enter para no cambiarlo): ").strip()
+    if nuevo_horario:
+        usuarios[nombre]["horario_trabajo"] = nuevo_horario
+
+    nuevos_lugares = input("Ingrese las nuevas IPs de conexión (separadas por comas, o Enter para no cambiar): ").strip()
+    if nuevos_lugares:
+        usuarios[nombre]["lugares_conexion"] = [ip.strip() for ip in nuevos_lugares.split(",")]
+
+    guardar_usuarios()
     print(f"Datos del usuario '{nombre}' actualizados exitosamente.")
 
 
-usuarios = {}
+
+
+
 
 def cargar_usuarios():
-    """Cargar los usuarios desde un archivo JSON."""
+    """Carga los usuarios desde un archivo JSON de manera segura."""
     global usuarios
     try:
-        if not os.path.exists("usuarios.json"):
-            # Crear un archivo JSON vacío si no existe
-            with open("usuarios.json", "w") as archivo:
-                json.dump({}, archivo)  # Guardar un diccionario vacío
-        with open("usuarios.json", "r") as archivo:
-            usuarios = json.load(archivo)
-    except Exception as e:
+        if not os.path.exists(usuarios_file):
+            print("El archivo usuarios.json no existe. Creándolo...")
+            with open(usuarios_file, "w") as archivo:
+                json.dump({}, archivo)  # Crear archivo vacío
+            usuarios = {}
+        else:
+            with open(usuarios_file, "r") as archivo:
+                datos = json.load(archivo)
+
+                if not isinstance(datos, dict):
+                    raise ValueError("El archivo usuarios.json no contiene un diccionario válido.")
+
+                # Validar datos y establecer valores por defecto si es necesario
+                for usuario, info in datos.items():
+                    if "horario_trabajo" not in info or not info["horario_trabajo"]:
+                        datos[usuario]["horario_trabajo"] = "00:00 - 23:59"
+                    if "lugares_conexion" not in info or not isinstance(info["lugares_conexion"], list):
+                        datos[usuario]["lugares_conexion"] = ["127.0.0.1"]
+
+                usuarios = datos
+
+        print("Usuarios cargados correctamente desde usuarios.json.")
+
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"Error al cargar usuarios: {e}. Se restaurará un archivo vacío.")
+        registrar_error(f"Error al cargar usuarios: {e}")
         usuarios = {}
-        registrar_error(f"Error al cargar usuarios: {e}")   
+        guardar_usuarios()
+    except Exception as e:
+        print(f"Error inesperado al cargar usuarios: {e}")
+        registrar_error(f"Error inesperado al cargar usuarios: {e}")
+        usuarios = {}
+
+
 
 def guardar_usuarios():
-    """Guardar los usuarios en un archivo JSON."""
-    with open("usuarios.json", "w") as archivo:
-        json.dump(usuarios, archivo, indent=4)
+    """Guarda la información de los usuarios en usuarios.json de forma segura."""
+    try:
+        with open(usuarios_file, "w") as archivo:
+            json.dump(usuarios, archivo, indent=4)
+        print("Usuarios guardados correctamente.")
+    except Exception as e:
+        print(f"Error al guardar usuarios en el archivo: {e}")
+        registrar_error(f"Error al guardar usuarios: {e}")
+
 
 def agregar_usuario():
-    """Registrar un nuevo usuario o actualizar uno existente."""
-    nombre = input("Ingrese el nombre del usuario: ")
+    """Registra un nuevo usuario o actualiza uno existente."""
+    global usuarios
+
+    nombre = input("Ingrese el nombre del usuario: ").strip()
+    if not nombre:
+        print("Error: El nombre del usuario no puede estar vacío.")
+        return
+
     if nombre in usuarios:
-        print(f"El usuario '{nombre}' ya existe. ¿Desea actualizar sus datos? (s/n)")
-        respuesta = input().strip().lower()
-        if respuesta != 's':
-            print("Operación cancelada.")
-            return
-    else:
-        print(f"Registrando nuevo usuario: {nombre}.")
-    
-    # Solicitar datos del usuario
-    horario_trabajo = input("Ingrese el horario de trabajo (ejemplo: 9:00 - 17:00): ")
-    lugares_conexion = input("Ingrese los lugares de conexión (IPs o localhost, separados por comas): ").split(',')
-    
-    # Guardar los datos del usuario
-    usuarios[nombre] = {
-        "horario_trabajo": horario_trabajo,
-        "lugares_conexion": [ip.strip() for ip in lugares_conexion]
-    }
-    
-    # Guardar en el archivo
-    guardar_usuarios()
-    print(f"Los datos de '{nombre}' han sido actualizados exitosamente.")
+        print(f"El usuario '{nombre}' ya está registrado en el sistema.")
+        return
+
+    contrasena = input("Ingrese la contraseña para el usuario: ").strip()
+    if len(contrasena) < 4:
+        print("Error: La contraseña debe tener al menos 4 caracteres.")
+        return
+
+    horario_trabajo = input("Ingrese el horario de trabajo (ejemplo: 9:00 - 17:00): ").strip()
+    if not horario_trabajo or "-" not in horario_trabajo:
+        print("Error: El horario de trabajo es obligatorio y debe tener el formato 'inicio - fin'.")
+        return
+
+    lugares_conexion = input("Ingrese las IPs permitidas (separadas por comas): ").strip()
+    if not lugares_conexion:
+        lugares_conexion = "127.0.0.1"
+
+    try:
+        crear_usuario_sistema(nombre, contrasena)
+
+        usuarios[nombre] = {
+            "horario_trabajo": horario_trabajo,
+            "lugares_conexion": [ip.strip() for ip in lugares_conexion.split(",")],
+        }
+
+        guardar_usuarios()
+        print(f"Usuario '{nombre}' creado y guardado exitosamente.")
+
+    except Exception as e:
+        print(f"Error al crear el usuario '{nombre}': {e}")
+        registrar_error(f"Error al crear el usuario '{nombre}': {e}")
 
 def mostrar_menu_usuario():
-    """Mostrar un menú con las opciones disponibles para el comando 'usuario'."""
+    """Muestra el menú de gestión de usuarios."""
     while True:
-        print("\n--- Menú de opciones ---")
-        print("1. Registrar nuevo usuario / Actualizar usuario")
-        print("2. Ver todos los usuarios registrados")
-        print("3. Salir")
-        opcion = input("Elija una opción: ").strip()
-        
+        print("\n--- Menú de gestión de usuarios ---")
+        print("1. Registrar nuevo usuario")
+        print("2. Mostrar usuarios registrados")
+        print("3. Actualizar usuario")
+        print("4. Salir")
+        opcion = input("Seleccione una opción: ").strip()
+
         if opcion == "1":
             agregar_usuario()
         elif opcion == "2":
-            ver_usuarios()
+            mostrar_usuarios()
         elif opcion == "3":
+            actualizar_usuario()
+        elif opcion == "4":
+            print("Saliendo del menú de usuarios.")
             break
         else:
             print("Opción no válida. Intente de nuevo.")
 
-def ver_usuarios():
-    """Mostrar los datos de todos los usuarios registrados."""
-    if not usuarios:
-        print("No hay usuarios registrados.")
-        return
-    
-    print("\n--- Usuarios registrados ---")
-    for nombre, datos in usuarios.items():
-        print(f"Nombre: {nombre}")
-        print(f"  Horario de trabajo: {datos['horario_trabajo']}")
-        print(f"  Lugares de conexión: {', '.join(datos['lugares_conexion'])}")
-        print()
+
+
 
 def usuario():
     """Función principal para ejecutar el comando 'usuario' y mostrar el menú."""
@@ -579,9 +558,9 @@ def usuario():
     mostrar_menu_usuario()
 
 # Cargar usuarios desde el archivo al inicio del programa
-cargar_usuarios()
+    cargar_usuarios()
 
-demonios_file = "demonios.json"
+    demonios_file = "demonios.json"
 
 def cargar_demonios():
     """Carga la lista de demonios desde un archivo JSON."""
@@ -707,6 +686,17 @@ def ejecutar_comando_sistema(comando):
 
 
 
+def validar_datos_usuario(datos):
+    horario = datos.get("horario_trabajo", "").strip()
+    lugares = datos.get("lugares_conexion", [])
+
+    if not horario or not lugares:
+        print("Advertencia: Datos incompletos para el usuario. Asumiendo valores por defecto.")
+        return {
+            "horario_trabajo": "00:00 - 23:59",
+            "lugares_conexion": ["127.0.0.1"]
+        }
+    return datos
 
 usuario_horarios_log = "usuario_horarios_log"
 
@@ -769,21 +759,21 @@ def registrar_evento_sesion(usuario, ip, tipo_evento):
 def mostrar_help():
     print(f"""
     Comandos disponibles:
-    copiar <carpeta_origen> <nombre_archivo> <carpeta_destino>  - Copia un archivo de una carpeta a otra.
-    mover <carpeta_origen> <nombre_archivo> <carpeta_destino>   - Mueve un archivo de una carpeta a otra.
-    renombrar <carpeta_origen> <nombre_archivo> <nuevo_nombre>  - Renombra un archivo en la misma carpeta.
-    listar <carpeta>                                           - Lista los archivos y directorios en una carpeta.
-    creardir <carpeta>                                         - Crea un nuevo directorio.
-    ir <nuevo_directorio>                                      - Cambia al directorio especificado.
-    permisos <archivo> <permisos>                              - Cambia los permisos de un archivo (ejemplo: 777, 755).
-    propietario <archivo/ruta> <UID> <GID>                     - Cambia el propietario de un archivo o directorio.
-    password <usuario> <nueva_contrasena>                    - Cambia la contraseña de un usuario.
-    usuario                                                    - Opciones de usuario
-    demonios                                                   - Manejo de demonios
-    transferencias                                             - Realizar transferencias FTP o SCP
-    <comando del sistema>                                      - Ejecuta cualquier comando del sistema no mencionado aquí.
-    help                                                       - Muestra esta lista de comandos disponibles.
-    salir                                                      - Sale de la shell.
+    copiar <origen> <nombre> <destino>          - Copia un archivo.
+    mover <origen> <nombre> <destino>           - Mueve un archivo.
+    renombrar <origen> <nombre> <nuevo_nombre>  - Renombra un archivo.
+    listar <carpeta>                            - Lista los archivos y directorios.
+    creardir <carpeta>                          - Crea un nuevo directorio.
+    ir <nuevo_directorio>                       - Cambia al directorio especificado.
+    permisos <archivo> <permisos>               - Cambia los permisos de un archivo.
+    propietario <archivo/ruta> <UID> <GID>      - Cambia el propietario.
+    password <usuario> <nueva_contrasena>       - Cambia la contraseña de un usuario.
+    usuario                                     - Opciones de usuario
+    demonios                                    - Manejo de demonios
+    transferencias                              - Realizar transferencias FTP o SCP
+    <comando del sistema>                       - Ejecuta cualquier comando.
+    help                                        - Ayuda.
+    salir                                       - Sale de la shell.
 
     Directorio actual: {directorio_actual}
         """)
@@ -881,6 +871,8 @@ def menu_transferencias(usuario):
             print("Opción no válida. Intente nuevamente.")
 
 def shell():
+    
+
     print("Bienvenido a la shell de archivos. Usa 'help' para ver los comandos disponibles.")
     
     # Solicitar información del usuario
@@ -955,4 +947,12 @@ def shell():
         registrar_error("Sesión terminada por el usuario")
 
 if __name__ == "__main__":
+    if os.geteuid() != 0:
+        print("Este script requiere permisos de superusuario. Ejecútelo con sudo.")
+        exit(1)
+
+    usuarios = {}  # Variable global para almacenar los usuarios
+
+    # Cargar los usuarios desde el archivo al iniciar el programa
+    cargar_usuarios()
     shell()
