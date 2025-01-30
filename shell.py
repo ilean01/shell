@@ -434,7 +434,6 @@ def actualizar_usuario():
 
 
 
-
 def cargar_usuarios():
     """Carga los usuarios desde un archivo JSON de manera segura."""
     global usuarios
@@ -445,24 +444,32 @@ def cargar_usuarios():
                 json.dump({}, archivo)  # Crear archivo vacío
             usuarios = {}
         else:
-            with open(usuarios_file, "r") as archivo:
-                datos = json.load(archivo)
+            with open(usuarios_file, "r", encoding="utf-8") as archivo:
+                contenido = archivo.read().strip()
+                
+                if not contenido:
+                    print("El archivo usuarios.json está vacío. Se restaurará un diccionario vacío.")
+                    usuarios = {}
+                else:
+                    usuarios = json.loads(contenido)  # Cargar JSON manualmente
 
-                if not isinstance(datos, dict):
+                if not isinstance(usuarios, dict):
                     raise ValueError("El archivo usuarios.json no contiene un diccionario válido.")
 
                 # Validar datos y establecer valores por defecto si es necesario
-                for usuario, info in datos.items():
-                    if "horario_trabajo" not in info or not info["horario_trabajo"]:
-                        datos[usuario]["horario_trabajo"] = "00:00 - 23:59"
-                    if "lugares_conexion" not in info or not isinstance(info["lugares_conexion"], list):
-                        datos[usuario]["lugares_conexion"] = ["127.0.0.1"]
+                for usuario, info in usuarios.items():
+                    if not isinstance(info, dict):
+                        print(f"Advertencia: Los datos del usuario '{usuario}' no son un diccionario válido.")
+                        continue
 
-                usuarios = datos
+                    if "horario_trabajo" not in info or not info["horario_trabajo"]:
+                        usuarios[usuario]["horario_trabajo"] = "00:00 - 23:59"
+                    if "lugares_conexion" not in info or not isinstance(info["lugares_conexion"], list):
+                        usuarios[usuario]["lugares_conexion"] = ["127.0.0.1"]
 
         print("Usuarios cargados correctamente desde usuarios.json.")
 
-    except (json.JSONDecodeError, ValueError) as e:
+    except json.JSONDecodeError as e:
         print(f"Error al cargar usuarios: {e}. Se restaurará un archivo vacío.")
         registrar_error(f"Error al cargar usuarios: {e}")
         usuarios = {}
@@ -471,6 +478,7 @@ def cargar_usuarios():
         print(f"Error inesperado al cargar usuarios: {e}")
         registrar_error(f"Error inesperado al cargar usuarios: {e}")
         usuarios = {}
+
 
 
 
@@ -718,7 +726,7 @@ def validar_horario(ahora, horario_permitido):
 def registrar_evento_sesion(usuario, ip, tipo_evento):
     usuarios = cargar_usuarios()
     if not isinstance(usuarios, dict):
-        print("Error: El archivo de usuarios no contiene un formato válido.")
+
         registrar_error("Archivo usuarios.json no es un diccionario válido.")
         return False
 
@@ -882,7 +890,7 @@ def shell():
 
     # Registrar inicio de sesión
     if not registrar_evento_sesion(nombre_usuario, ip, "inicio"):
-        print("El usuario no está registrado correctamente. Continuará en la shell con acceso limitado.")
+        print(" ")
 
     try:
         while True:
@@ -954,5 +962,5 @@ if __name__ == "__main__":
     usuarios = {}  # Variable global para almacenar los usuarios
 
     # Cargar los usuarios desde el archivo al iniciar el programa
-    cargar_usuarios()
+    
     shell()
