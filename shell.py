@@ -770,15 +770,15 @@ def mostrar_help():
     copiar <origen> <nombre> <destino>          - Copia un archivo.
     mover <origen> <nombre> <destino>           - Mueve un archivo.
     renombrar <origen> <nombre> <nuevo_nombre>  - Renombra un archivo.
-    listar <carpeta>                            - Lista los archivos y directorios.
+    listar <carpeta>                            - Ver archivos y directorios.
     creardir <carpeta>                          - Crea un nuevo directorio.
-    ir <nuevo_directorio>                       - Cambia al directorio especificado.
-    permisos <archivo> <permisos>               - Cambia los permisos de un archivo.
+    ir <nuevo_directorio>                       - Cambia al directorio deseado.
+    permisos <archivo> <permisos>               - Cambia los permisos de archivo.
     propietario <archivo/ruta> <UID> <GID>      - Cambia el propietario.
-    password <usuario> <nueva_contrasena>       - Cambia la contraseña de un usuario.
+    password <usuario> <nueva_contrasena>       - Cambia la contraseña.
     usuario                                     - Opciones de usuario
     demonios                                    - Manejo de demonios
-    transferencias                              - Realizar transferencias FTP o SCP
+    transferencias                              - Hacer ransferencias FTP o SCP
     <comando del sistema>                       - Ejecuta cualquier comando.
     help                                        - Ayuda.
     salir                                       - Sale de la shell.
