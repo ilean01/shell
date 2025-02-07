@@ -738,6 +738,7 @@ def shell():
                 print("Saliendo de la shell. ¡Hasta luego!")
                 registrar_evento_sesion(nombre_usuario, ip, "salida")
                 subprocess.run(["/bin/bash"])  # Abre Bash automáticamente
+                registrar_historial("salir")
                 break
             elif cmd == "help":
                 registrar_historial("help")
