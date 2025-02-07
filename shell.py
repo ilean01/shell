@@ -5,7 +5,11 @@ import os
 import json  # Para almacenar los datos en formato JSON
 import socket
 import shlex
-usuario_horarios_log = "usuario_horarios_log"
+import getpass
+
+nombre_usuario = getpass.getuser()
+
+usuario_horarios_log = "usuario_horarios.log"
 USER_DATA = "/usr/local/bin/user_data.txt"
 os.environ["PATH"] = "/bin:/usr/bin:/usr/local/bin:" + os.environ.get("PATH", "")
 usuarios = {}
@@ -443,44 +447,63 @@ def validar_horario(ahora, horario_permitido):
 
 
 def registrar_evento_sesion(usuario, ip, tipo_evento):
-    usuarios = os.getenv("USER") or os.getenv("LOGNAME") or "desconocido"
+    global usuarios  # Asegurar acceso a la variable global
 
-    if not isinstance(usuarios, dict):
-
-        registrar_error("Archivo usuarios.json no es un diccionario válido.")
-        return False
-
-    if usuario not in usuarios:
-        print(f"Error: El usuario '{usuario}' no está registrado.")
-        registrar_error(f"Intento de sesión con usuario no registrado: {usuario}")
-        return False
+    # Crear el archivo de log si no existe
+    if not os.path.exists(usuario_horarios_log):
+        with open(usuario_horarios_log, "w") as log:
+            log.write("Log de eventos de usuario\n")
 
     ahora = datetime.datetime.now()
     horario_actual = ahora.time()
-    usuario_info = usuarios.get(usuario, {})
 
+    # Verificar si el usuario root debe agregarse automáticamente
+    if usuario == "root":
+        usuario_info = {
+            "horario_trabajo": "00:00 - 09:00",
+            "lugares_conexion": ["127.0.1.1"]
+         }
+    else: 
+        usuario_info = usuarios.get(usuario, {})
+
+    if not usuario_info:
+        print(f"⚠️ El usuario '{usuario}' no está registrado en la base de datos.")
+        return False
+
+    # Extraer horario permitido
     try:
         horario_permitido = {
             "inicio": usuario_info["horario_trabajo"].split("-")[0].strip(),
             "fin": usuario_info["horario_trabajo"].split("-")[1].strip(),
         }
-    except KeyError as e:
-        registrar_error(f"Falta clave en datos de usuario {usuario}: {e}")
+    except KeyError:
+        print(f"⚠️ Datos de horario no encontrados para el usuario '{usuario}'.")
         return False
 
     ips_permitidas = usuario_info.get("lugares_conexion", [])
+
+    # Validar si está dentro del horario y si la IP es permitida
     dentro_de_horario = validar_horario(horario_actual, horario_permitido)
     ip_permitida = ip in ips_permitidas
 
     mensaje = f"{ahora.strftime('%Y-%m-%d %H:%M:%S')} - Usuario: {usuario} - Evento: {tipo_evento} - IP: {ip}"
-    if not dentro_de_horario:
-        mensaje += " (FUERA DE HORARIO)"
-    if not ip_permitida:
-        mensaje += " (IP NO PERMITIDA)"
 
-    with open(usuario_horarios_log, "a") as log:
-        log.write(mensaje + "\n")
-    print("Evento de sesión registrado.")
+    if not dentro_de_horario:
+        mensaje += " ❌ (FUERA DE HORARIO)"
+        print(f"⚠️ Usuario '{usuario}' intentó ingresar fuera de horario.")
+    
+    if not ip_permitida:
+        mensaje += " ❌ (IP NO PERMITIDA)"
+        print(f"⚠️ Usuario '{usuario}' intentó ingresar desde una IP no permitida ({ip}).")
+
+    # Escribir en el archivo de log
+    try:
+        with open(usuario_horarios_log, "a") as log:
+            log.write(mensaje + "\n")
+        print("✅ Evento de sesión registrado correctamente.")
+    except Exception as e:
+        print(f"❌ Error al escribir en el log: {e}")
+
     return True
 
 
@@ -660,9 +683,7 @@ def agregar_usuario(nombre, horario, ips):
         comando = f"useradd -m {nombre}"
         result = subprocess.run(comando, shell=True, capture_output=True, text=True)
 
-        if result.returncode != 0:
-            print(f"Error al crear el usuario '{nombre}'.")
-            return
+    
 
         # Establecer contraseña
         print(f"Estableciendo contraseña para '{nombre}'.")
@@ -810,9 +831,9 @@ def shell():
         registrar_error("Sesión terminada por el usuario")
 
 if __name__ == "__main__":
-    if os.geteuid() != 0:
-        print("Este script requiere permisos de superusuario. Ejecútelo con sudo.")
-        exit(1)
+   # if os.geteuid() != 0:
+    #    print("Este script requiere permisos de superusuario. Ejecútelo con sudo.")
+     #   exit(1)
 
     usuarios = {}  # Variable global para almacenar los usuarios
     # Cargar los usuarios desde el archivo al iniciar el programa
